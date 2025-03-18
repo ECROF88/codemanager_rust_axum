@@ -25,10 +25,3 @@ pub struct LoginRequest {
 required 验证器专门用于 Option<T> 类型
 length 验证器用于 String 类型
 */
-
-#[derive(serde::Serialize)]
-pub struct UserData {
-    pub username: String,
-    pub email: String,
-    // 其他需要的字段
-}
