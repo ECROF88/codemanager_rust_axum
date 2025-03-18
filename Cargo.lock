@@ -248,6 +248,7 @@ dependencies = [
  "git2",
  "hyper",
  "jsonwebtoken",
+ "lazy_static",
  "r2d2",
  "r2d2_redis",
  "redis 0.28.2",

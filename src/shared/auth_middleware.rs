@@ -1,4 +1,4 @@
-use super::jwt::{validate_token, Claims};
+use super::jwt::{Claims, validate_token};
 use crate::shared::setting;
 use axum::{
     body::Body,
@@ -7,7 +7,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 // const JWT_SECRET: &[u8] = b"your-secret-key";
 // const JWT_SECRET: &[u8] = b"your-secret-key";
 // #[derive(Debug, Serialize, Deserialize, Clone)]

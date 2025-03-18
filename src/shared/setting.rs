@@ -1,5 +1,6 @@
+use lazy_static::lazy_static;
 use serde::Deserialize;
-
+use std::sync::RwLock;
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub jwt: JwtConfig,
@@ -25,4 +26,10 @@ pub fn load_config() -> Settings {
         .unwrap()
         .try_deserialize()
         .unwrap()
+}
+pub fn get_config() -> std::sync::RwLockReadGuard<'static, Settings> {
+    CONFIG.read().unwrap()
+}
+lazy_static! {
+    static ref CONFIG: RwLock<Settings> = RwLock::new(load_config());
 }
