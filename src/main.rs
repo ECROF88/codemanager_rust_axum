@@ -1,4 +1,6 @@
-use axum::{routing::get, Router};
+use std::env;
+
+use axum::{Router, routing::get};
 mod dtos;
 // mod error;
 // mod handlers;
@@ -9,9 +11,18 @@ use code_management_backend::{create_router, shared::setting};
 // use handlers::handler;
 // use shared::error;
 mod shared;
+
+use jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 #[tokio::main]
 async fn main() {
-    let config = setting::load_config();
+    unsafe {
+        env::set_var("RUST_BACKTRACE", "1");
+    }
+    // let config = setting::load_config();
     // build our application with a single route
     // let app = Router::new().route("/", get(|| async { "Hello, World!" }));
     let app = create_router();
