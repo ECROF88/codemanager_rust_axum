@@ -22,6 +22,41 @@ impl AuthService {
         let pool = r2d2::Pool::builder().build(redis).unwrap();
         AuthService { pool }
     }
+
+    fn validate_user_pass(&self, username: &str, password: &str) -> Result<(), AppError> {
+        let mut conn = self
+            .pool
+            .get()
+            .map_err(|_| AppError::InternalServerError("Redis connection failed".to_string()))?;
+
+        let user_exists: bool = conn
+            .exists(format!("user:{}", username))
+            .map_err(|_| AppError::InternalServerError("Redis operation failed".to_string()))?;
+
+        if !user_exists {
+            return Err(AppError::Unauthorized(
+                "Invalid username or password".to_string(),
+            ));
+        }
+
+        let user_json: String = conn
+            .get(format!("user:{}", username))
+            .map_err(|_| AppError::InternalServerError("Redis operation failed".to_string()))?;
+
+        let user: User = serde_json::from_str(&user_json)
+            .map_err(|_| AppError::InternalServerError("Failed to parse user data".to_string()))?;
+
+        if user.password != password {
+            return Err(AppError::Unauthorized(
+                "Invalid username or password".to_string(),
+            ));
+        }
+        // let token = jwt::generate_token(username)
+        //     .map_err(|_| AppError::InternalServerError("Failed to generate token".to_string()))?;
+
+        // Ok(token)
+        Ok(())
+    }
     pub async fn register(&self, payload: request::RegisterRequest) -> Result<(), AppError> {
         // TODO: 数据库插入逻辑
         // let newuser = User::new(payload.username.clone(), payload.email, payload.password);
@@ -94,16 +129,12 @@ impl AuthService {
             None => return Err(AppError::BadRequest("Password is required".into())),
         };
 
-        // TODO: 数据库查询验证用户名密码
-
-        // 这里模拟验证过程
-        if password == "123456" {
-            let token = jwt::generate_token(username)
-                .map_err(|_| AppError::InternalServerError("Failed to generate token".into()))?;
-            Ok(token)
+        if self.validate_user_pass(&username, &password).is_ok() {
+            jwt::generate_token(&username)
+                .map_err(|_| AppError::InternalServerError("Failed to generate token".to_string()))
         } else {
             Err(AppError::Unauthorized(
-                "Invalid username or password".into(),
+                "validate user password not success".to_string(),
             ))
         }
     }

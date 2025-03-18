@@ -12,12 +12,12 @@ pub struct Claims {
     pub iat: u64,    // 签发时间
 }
 // static JWT_SECRET: &[u8] = b"your_secret_key";
-pub fn generate_token(user_id: String) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn generate_token(user_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let expires_at = now + Duration::hours(24);
 
     let claims = Claims {
-        sub: user_id,
+        sub: user_id.to_string(),
         iat: now.timestamp() as u64,
         exp: expires_at.timestamp() as u64,
     };
