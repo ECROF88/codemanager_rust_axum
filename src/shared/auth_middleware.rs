@@ -1,4 +1,7 @@
-use super::jwt::{Claims, validate_token};
+use super::{
+    error::AppError,
+    jwt::{Claims, validate_token},
+};
 use crate::shared::setting;
 use axum::{
     body::Body,
@@ -20,7 +23,7 @@ pub async fn auth_middleware(
     // State(state): State<()>, // You likely need a real state type here
     mut req: Request<Body>,
     next: Next,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, AppError> {
     // 从请求头中获取token
     let token = req
         .headers()
@@ -33,10 +36,11 @@ pub async fn auth_middleware(
                 None
             }
         })
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .ok_or(AppError::Unauthorized("can not get token".to_string()))?;
     // let setting = setting::load_config();
     // 验证token
-    let claims = validate_token(&token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let claims = validate_token(&token)
+        .map_err(|_| AppError::Unauthorized("token validate failed".to_string()))?;
 
     // 将用户信息注入请求扩展中
     req.extensions_mut().insert(claims);
