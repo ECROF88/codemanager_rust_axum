@@ -1,0 +1,22 @@
+[package]
+name = "code-management-backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+config = "0.15.4"
+git2 = "0.20.0"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.42.0", features = ["full"] }
+axum = { version = "0.8.1", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+validator = { version = "0.16", features = ["derive"] }
+serde_json = "1.0"
+tower-http = { version = "0.6.1", features = ["cors", "trace"] }
+jsonwebtoken = "9.3.0"
+hyper = "1.6.0"
+tower = "0.5.2"
+redis = { version = "0.28.2", features = ["r2d2"] }
+futures = "0.3.31"
+r2d2 = "0.8.10"
+r2d2_redis = "0.14.0"

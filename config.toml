@@ -1,0 +1,9 @@
+[git]
+name = "ECROF88"
+email = "maomao8672@outlook.com"
+
+[jwt]
+jwt_secret = "your-secure-secret-key"
+
+[db]
+REDIS_URI = "redis://127.0.0.1/"
