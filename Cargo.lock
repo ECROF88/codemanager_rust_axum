@@ -247,6 +247,7 @@ dependencies = [
  "futures",
  "git2",
  "hyper",
+ "jemalloc-sys",
  "jemallocator",
  "jsonwebtoken",
  "lazy_static",
