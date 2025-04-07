@@ -9,6 +9,7 @@ use crate::gitmodule::{CommitInfo, GitManager};
 use crate::models::user::{self, User};
 use crate::shared::error::AppError;
 use crate::shared::jwt;
+use crate::vos::ReposVo;
 use crate::vos::userdata::UserData;
 use config::Config;
 
@@ -173,40 +174,49 @@ impl AuthService {
 #[derive(Clone)]
 pub struct GitService {
     git_manager: GitManager,
+    pool: Pool<Client>,
 }
 
 impl GitService {
     pub fn new() -> Self {
-        // 从配置文件或环境变量加载 Git 配置
+        let redis = Client::open("redis://127.0.0.1:6379").expect("Failed to connect to Redis");
+        let pool = r2d2::Pool::builder().build(redis).unwrap();
+
         let config = Config::builder()
-            .add_source(config::File::with_name("config/default"))
+            .add_source(config::File::with_name("config"))
             .build()
             .expect("Failed to load configuration");
 
-        let git_config = config
-            .get::<serde_json::Value>("git")
-            .expect("Failed to load git configuration");
+        // let git_config = config
+        //     .get::<serde_json::Value>("git")
+        //     .expect("Failed to load git configuration");
 
-        let name = git_config["name"]
-            .as_str()
-            .unwrap_or("Git User")
-            .to_string();
-        let email = git_config["email"]
-            .as_str()
-            .unwrap_or("git@example.com")
-            .to_string();
+        // let name = git_config["name"]
+        //     .as_str()
+        //     .unwrap_or("Git User")
+        //     .to_string();
+        // let email = git_config["email"]
+        //     .as_str()
+        //     .unwrap_or("git@example.com")
+        //     .to_string();
 
         // 获取仓库基础路径
         let base_path = config
             .get::<String>("git.repositories_path")
-            .unwrap_or_else(|_| "/tmp/git-repositories".to_string());
+            .unwrap_or_else(|_| {
+                let default_path = "/tmp/repos";
+                std::fs::create_dir_all(default_path)
+                    .expect("Failed to create default repositories directory");
 
+                default_path.to_string()
+            });
+        println!("Using repositories path: {}", base_path);
         let git_manager = GitManager::new(
             &base_path,
-            crate::gitmodule::GitConfig { name, email }, // 需要确保 GitConfig 是公开的或在适当的范围内可见
+            // crate::gitmodule::GitConfig { name, email }, // 需要确保 GitConfig 是公开的或在适当的范围内可见
         );
 
-        Self { git_manager }
+        Self { git_manager, pool }
     }
 
     pub async fn clone_repo_for_user(
@@ -226,26 +236,44 @@ impl GitService {
         repo_name: &str,
         message: &str,
         paths: &[&str],
-        user_data: &UserData, // 从认证服务获取的用户数据
+        // user_data: &UserData, // 从认证服务获取的用户数据
     ) -> Result<String, AppError> {
+        let mut conn = self
+            .pool
+            .get()
+            .map_err(|_| AppError::InternalServerError("Redis connect failed".to_string()))?;
+
+        // 查找用户
+        let user_json: String = conn
+            .get(format!("user:{}", user_id))
+            .map_err(|_| AppError::NotFound("User not found".to_string()))?;
+
+        let user: User = serde_json::from_str(&user_json)
+            .map_err(|_| AppError::InternalServerError("Failed to parse user data".to_string()))?;
+        // let email = user.email;
+
         self.git_manager.commit_for_user(
             user_id,
             repo_name,
             message,
             paths,
-            &user_data.username,
-            &user_data.email,
+            // &user_data.username,
+            // &user_data.email,
+            &user.email,
         )
     }
 
-    pub async fn get_repo_history(
+    pub async fn get_repo_commit_history(
         &self,
         user_id: &str,
         repo_name: &str,
         limit: usize,
     ) -> Result<Vec<CommitInfo>, AppError> {
-        // 直接使用 GitManager 获取仓库历史
         self.git_manager
             .get_commit_history(user_id, repo_name, limit)
+    }
+
+    pub async fn get_repos_data_for_users(&self, user_id: &str) -> Result<Vec<ReposVo>, AppError> {
+        self.git_manager.get_repos_data_for_users(user_id)
     }
 }

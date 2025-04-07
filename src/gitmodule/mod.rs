@@ -3,10 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::shared::error::AppError;
+use crate::{shared::error::AppError, vos::ReposVo};
 // use axum::extract::Path;
 use config::Config;
 use git2::{IndexAddOption, Repository, Signature, build::RepoBuilder};
+use hyper::header;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct GitConfig {
@@ -32,11 +33,14 @@ pub struct GitOperationResult {
 #[derive(Clone)]
 pub struct GitManager {
     base_path: PathBuf, // 仓库存储的基础路径
-    config: GitConfig,  // 默认Git配置
+                        // config: GitConfig,  // 默认Git配置
 }
 
 impl GitManager {
-    pub fn new(base_path: &str, config: GitConfig) -> Self {
+    pub fn new(
+        base_path: &str,
+        //  config: GitConfig
+    ) -> Self {
         let path = PathBuf::from(base_path);
 
         if !path.exists() {
@@ -45,7 +49,7 @@ impl GitManager {
 
         GitManager {
             base_path: path,
-            config,
+            // config,
         }
     }
 
@@ -106,7 +110,7 @@ impl GitManager {
         repo_name: &str,
         message: &str,
         paths: &[&str],
-        user_name: &str,  // 用户姓名，通常是 username
+        // user_name: &str,  // 用户姓名，通常是 username
         user_email: &str, // 用户邮箱
     ) -> Result<String, AppError> {
         let repo_path = self.get_user_repo_path(user_id, repo_name);
@@ -148,7 +152,7 @@ impl GitManager {
         // let signature = Signature::now(&self.config.name, &self.config.email).map_err(|e| {
         //     AppError::InternalServerError(format!("Failed to create signature: {}", e))
         // })?;
-        let signature = Signature::now(user_name, user_email).map_err(|e| {
+        let signature = Signature::now(user_id, user_email).map_err(|e| {
             AppError::InternalServerError(format!("Failed to create signature: {}", e))
         })?;
 
@@ -274,6 +278,63 @@ impl GitManager {
         }
 
         Ok(status)
+    }
+
+    pub fn get_repos_data_for_users(&self, user_id: &str) -> Result<Vec<ReposVo>, AppError> {
+        println!("userid{} is getting all repos data", user_id);
+        let user_dir = self.base_path.join(user_id);
+        println!("user_dir is {:?}", user_dir);
+        if !user_dir.exists() {
+            return Ok(Vec::new()); // 用户没有仓库，返回空列表
+        }
+
+        let entries = fs::read_dir(&user_dir).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to read user directory: {}", e))
+        })?;
+
+        let mut repos = Vec::new();
+
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                println!("each entry.path is {:?}", path);
+                if path.is_dir() && Repository::open(&path).is_ok() {
+                    let branch = self.get_current_branch(&path)?;
+                    let repo_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+
+                    repos.push(ReposVo {
+                        name: repo_name,
+                        branch,
+                    });
+                }
+            }
+        }
+        Ok(repos)
+    }
+
+    fn get_current_branch(&self, repo_path: &Path) -> Result<String, AppError> {
+        let repo = self.open_repo(repo_path)?;
+
+        let head = repo.head().map_err(|e| {
+            AppError::InternalServerError(format!("Failed to get HEAD reference: {}", e))
+        })?;
+
+        if head.is_branch() {
+            let branch_name = head.shorthand().unwrap_or("unknown").to_string();
+            Ok(branch_name)
+        } else {
+            // 可能是detached HEAD状态
+            let commit_id = head
+                .peel_to_commit()
+                .map(|c| c.id().to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            Ok(format!("detached@{}", &commit_id[..7]))
+        }
     }
 
     // 辅助方法：状态码转字符串
