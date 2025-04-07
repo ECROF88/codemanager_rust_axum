@@ -25,3 +25,12 @@ pub struct LoginRequest {
 required 验证器专门用于 Option<T> 类型
 length 验证器用于 String 类型
 */
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct RepoRequest {
+    #[validate(required(message = "Repository name is required"))]
+    pub repo_name: Option<String>,
+
+    // 可选参数：限制获取的提交记录数量
+    pub limit: Option<usize>,
+}

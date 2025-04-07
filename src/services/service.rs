@@ -5,10 +5,19 @@ use redis::{Client, Commands, Connection};
 // use super::{dtos::request, model::User};
 // use super::super::error;
 use crate::dtos::request::{self};
+use crate::gitmodule::{CommitInfo, GitManager};
 use crate::models::user::{self, User};
 use crate::shared::error::AppError;
 use crate::shared::jwt;
 use crate::vos::userdata::UserData;
+use config::Config;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub auth_service: AuthService,
+    pub git_service: GitService,
+}
+
 #[derive(Clone)]
 pub struct AuthService {
     // redis: Client,
@@ -158,5 +167,85 @@ impl AuthService {
             email: user.email,
             avatar: user.avatar,
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct GitService {
+    git_manager: GitManager,
+}
+
+impl GitService {
+    pub fn new() -> Self {
+        // 从配置文件或环境变量加载 Git 配置
+        let config = Config::builder()
+            .add_source(config::File::with_name("config/default"))
+            .build()
+            .expect("Failed to load configuration");
+
+        let git_config = config
+            .get::<serde_json::Value>("git")
+            .expect("Failed to load git configuration");
+
+        let name = git_config["name"]
+            .as_str()
+            .unwrap_or("Git User")
+            .to_string();
+        let email = git_config["email"]
+            .as_str()
+            .unwrap_or("git@example.com")
+            .to_string();
+
+        // 获取仓库基础路径
+        let base_path = config
+            .get::<String>("git.repositories_path")
+            .unwrap_or_else(|_| "/tmp/git-repositories".to_string());
+
+        let git_manager = GitManager::new(
+            &base_path,
+            crate::gitmodule::GitConfig { name, email }, // 需要确保 GitConfig 是公开的或在适当的范围内可见
+        );
+
+        Self { git_manager }
+    }
+
+    pub async fn clone_repo_for_user(
+        &self,
+        user_id: &str,
+        repo_url: &str,
+        repo_name: &str,
+    ) -> Result<String, AppError> {
+        self.git_manager
+            .clone_repository_for_user(user_id, repo_url, repo_name)
+    }
+
+    // 用户提交更改的方法
+    pub async fn commit_changes(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        message: &str,
+        paths: &[&str],
+        user_data: &UserData, // 从认证服务获取的用户数据
+    ) -> Result<String, AppError> {
+        self.git_manager.commit_for_user(
+            user_id,
+            repo_name,
+            message,
+            paths,
+            &user_data.username,
+            &user_data.email,
+        )
+    }
+
+    pub async fn get_repo_history(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        limit: usize,
+    ) -> Result<Vec<CommitInfo>, AppError> {
+        // 直接使用 GitManager 获取仓库历史
+        self.git_manager
+            .get_commit_history(user_id, repo_name, limit)
     }
 }

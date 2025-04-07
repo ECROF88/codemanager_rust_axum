@@ -4,11 +4,13 @@ use axum::{
     middleware,
     routing::{get, post},
 };
+use services::service::{AppState, GitService};
 use tower::ServiceBuilder;
 use tower_http::{cors::Any, cors::CorsLayer, trace::TraceLayer};
 
 // 模块声明
 pub mod dtos;
+pub mod gitmodule;
 pub mod handlers;
 pub mod models;
 pub mod routes;
@@ -24,16 +26,15 @@ let app = Router::new()
   .layer(2)
   .layer(1); */
 /// 创建应用路由
+/// struct AppState {
+
 pub fn create_router() -> Router {
     // 初始化服务
-    let auth_service = AuthService::new();
-    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any);
-    // .allow_credentials(true);
-    // 创建主路由
-    // let app = Router::new()
-    //     .route("/public", get(todo!()))
-    //     .route("/internal", get(todo!()))
-    //     .layer(CorsLayer::permissive());
+    let app_state = AppState {
+        auth_service: AuthService::new(),
+        git_service: GitService::new(),
+    };
+
     Router::new()
         // API 路由组
         .nest(
@@ -51,9 +52,12 @@ pub fn create_router() -> Router {
                     "/protected",
                     Router::new()
                         .route("/user/userdata", get(handler::get_user_data))
+                        // .route("/gitclone", post(handler::get_user_data))
+                        // .route("/gitcommit", post(handler::get_user_data))
+                        .route("/repo/repodata", get(handler::get_repo_data))
                         .layer(middleware::from_fn(auth_middleware::auth_middleware)),
                 ),
         )
         .layer(CorsLayer::permissive())
-        .with_state(auth_service)
+        .with_state(app_state)
 }
