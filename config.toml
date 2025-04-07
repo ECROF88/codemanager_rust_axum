@@ -1,6 +1,4 @@
 [git]
-name = "ECROF88"
-email = "maomao8672@outlook.com"
 repositories_path = "/tmp/repos"
 
 [jwt]
