@@ -255,14 +255,14 @@ impl GitService {
         )
     }
 
-    pub async fn get_repo_commit_history(
+    pub async fn get_repo_commit_histories(
         &self,
         user_id: &str,
         repo_name: &str,
         limit: usize,
     ) -> Result<Vec<CommitInfo>, AppError> {
         self.git_manager
-            .get_commit_history(user_id, repo_name, limit)
+            .get_commit_histories(user_id, repo_name, limit)
     }
 
     pub async fn get_repos_data_for_users(&self, user_id: &str) -> Result<Vec<ReposVo>, AppError> {

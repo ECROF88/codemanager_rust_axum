@@ -235,7 +235,7 @@ impl GitManager {
         Ok(commit_id.to_string())
     }
 
-    pub fn get_commit_history(
+    pub fn get_commit_histories(
         &self,
         user_id: &str,
         repo_name: &str,

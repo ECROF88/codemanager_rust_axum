@@ -46,7 +46,7 @@ pub async fn get_user_data(
 }
 
 #[axum::debug_handler]
-pub async fn get_repo_commit_data(
+pub async fn get_repo_commit_histories(
     Extension(claims): Extension<Claims>,
     State(service): State<service::AppState>,
     // Json(payload): Json<request::RepoRequest>,
@@ -63,7 +63,7 @@ pub async fn get_repo_commit_data(
     if let Some(repo_name) = params.repo_name {
         let commit_history = service
             .git_service
-            .get_repo_commit_history(&user_id, &repo_name, limit)
+            .get_repo_commit_histories(&user_id, &repo_name, limit)
             .await?;
 
         Ok(ApiResponse::success_data(commit_history))
