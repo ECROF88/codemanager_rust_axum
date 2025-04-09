@@ -56,6 +56,7 @@ pub fn create_router() -> Router {
                         // .route("/gitcommit", post(handler::get_user_data))
                         .route("/repo/commitdata", get(handler::get_repo_commit_data))
                         .route("/repo/repos", get(handler::get_repos))
+                        .route("/repo/gitclone", post(handler::clone_repo_for_user))
                         .layer(middleware::from_fn(auth_middleware::auth_middleware)),
                 ),
         )

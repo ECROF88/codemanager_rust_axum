@@ -1,17 +1,26 @@
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use std::sync::RwLock;
+
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub jwt: JwtConfig,
+    pub git_path: GitPathConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct JwtConfig {
-    #[serde(deserialize_with = "deserialize_secret")]
+    #[serde(deserialize_with = "deserialize")]
     pub jwt_secret: Vec<u8>,
 }
-fn deserialize_secret<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+
+#[derive(Debug, Deserialize)]
+pub struct GitPathConfig {
+    #[serde(deserialize_with = "deserialize")]
+    pub repositories_path: Vec<u8>,
+}
+
+fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

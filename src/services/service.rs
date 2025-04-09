@@ -1,17 +1,13 @@
 use r2d2::Pool;
-use redis::{Client, Commands, Connection};
+use redis::{Client, Commands};
 
-// use super::super::shared::error::AppError;
-// use super::{dtos::request, model::User};
-// use super::super::error;
 use crate::dtos::request::{self};
 use crate::gitmodule::{CommitInfo, GitManager};
-use crate::models::user::{self, User};
+use crate::models::user::User;
 use crate::shared::error::AppError;
-use crate::shared::jwt;
+use crate::shared::{jwt, setting};
 use crate::vos::ReposVo;
 use crate::vos::userdata::UserData;
-use config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -61,10 +57,7 @@ impl AuthService {
                 "Invalid username or password".to_string(),
             ));
         }
-        // let token = jwt::generate_token(username)
-        //     .map_err(|_| AppError::InternalServerError("Failed to generate token".to_string()))?;
 
-        // Ok(token)
         Ok(())
     }
     pub async fn register(&self, payload: request::RegisterRequest) -> Result<(), AppError> {
@@ -108,8 +101,34 @@ impl AuthService {
         let _: () = conn
             .set(format!("user:{}", payload.username), user_json)
             .map_err(|_| AppError::InternalServerError("Failed to save user".to_string()))?;
+        // 使用user_id 作为key
+        // let _: () = conn
+        //     .set(user_id, user_json)
+        //     .map_err(|_| AppError::InternalServerError("Failed to save user".to_string()))?;
 
         println!("already insert user ");
+
+        self.generate_repopath(&payload.username).await?;
+        Ok(())
+    }
+
+    async fn generate_repopath(&self, user_name: &str) -> Result<(), AppError> {
+        let setting = setting::get_config();
+        let base_path = std::str::from_utf8(&setting.git_path.repositories_path)
+            .map_err(|e| AppError::InternalServerError(format!("Invalid UTF-8 in path: {}", e)))?;
+
+        // 构建用户特定的仓库路径
+        let user_path = format!("{}/{}", base_path, user_name);
+
+        // 创建目录
+        std::fs::create_dir_all(&user_path).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create directory: {}", e))
+        })?;
+
+        println!(
+            "Created repository path for user id:{} path:{}",
+            user_name, user_path
+        );
 
         Ok(())
     }
@@ -181,40 +200,12 @@ impl GitService {
     pub fn new() -> Self {
         let redis = Client::open("redis://127.0.0.1:6379").expect("Failed to connect to Redis");
         let pool = r2d2::Pool::builder().build(redis).unwrap();
+        let setting = setting::get_config();
+        let base_path = &setting.git_path.repositories_path;
 
-        let config = Config::builder()
-            .add_source(config::File::with_name("config"))
-            .build()
-            .expect("Failed to load configuration");
-
-        // let git_config = config
-        //     .get::<serde_json::Value>("git")
-        //     .expect("Failed to load git configuration");
-
-        // let name = git_config["name"]
-        //     .as_str()
-        //     .unwrap_or("Git User")
-        //     .to_string();
-        // let email = git_config["email"]
-        //     .as_str()
-        //     .unwrap_or("git@example.com")
-        //     .to_string();
-
-        // 获取仓库基础路径
-        let base_path = config
-            .get::<String>("git.repositories_path")
-            .unwrap_or_else(|_| {
-                let default_path = "/tmp/repos";
-                std::fs::create_dir_all(default_path)
-                    .expect("Failed to create default repositories directory");
-
-                default_path.to_string()
-            });
-        println!("Using repositories path: {}", base_path);
-        let git_manager = GitManager::new(
-            &base_path,
-            // crate::gitmodule::GitConfig { name, email }, // 需要确保 GitConfig 是公开的或在适当的范围内可见
-        );
+        let base_path_str =
+            std::str::from_utf8(base_path).expect("Invalid UTF-8 sequence in base path");
+        let git_manager = GitManager::new(base_path_str);
 
         Self { git_manager, pool }
     }
@@ -227,6 +218,7 @@ impl GitService {
     ) -> Result<String, AppError> {
         self.git_manager
             .clone_repository_for_user(user_id, repo_url, repo_name)
+            .await
     }
 
     // 用户提交更改的方法

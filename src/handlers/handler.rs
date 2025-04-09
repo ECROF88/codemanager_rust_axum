@@ -5,6 +5,7 @@ use crate::shared::response::ApiResponse;
 use crate::vos::ReposVo;
 use crate::vos::userdata::UserData;
 use crate::{dtos::request, shared::jwt::Claims};
+use axum::extract::Query;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use validator::{Validate, ValidationErrors};
 
@@ -48,18 +49,18 @@ pub async fn get_user_data(
 pub async fn get_repo_commit_data(
     Extension(claims): Extension<Claims>,
     State(service): State<service::AppState>,
-    Json(payload): Json<request::RepoRequest>,
+    // Json(payload): Json<request::RepoRequest>,
+    Query(params): Query<request::RepoRequest>,
 ) -> Result<ApiResponse<Vec<CommitInfo>>, AppError> {
     println!("Get repository commit data handler");
 
-    // 从JWT claims中获取用户ID（可用于权限验证）
     let user_id = claims.sub;
     println!("User ID: {}", user_id);
 
     // 获取仓库提交历史
-    let limit = payload.limit.unwrap_or(50); // 默认获取50条提交记录
+    let limit = params.limit.unwrap_or(50); // 默认获取50条提交记录
     // let commit_history = service.get_repo_history(&payload.repo_name, limit).await?;
-    if let Some(repo_name) = payload.repo_name {
+    if let Some(repo_name) = params.repo_name {
         let commit_history = service
             .git_service
             .get_repo_commit_history(&user_id, &repo_name, limit)
@@ -86,6 +87,35 @@ pub async fn get_repos(
         .await?;
 
     Ok(ApiResponse::success_data(repos_data))
+}
+
+#[axum::debug_handler]
+pub async fn clone_repo_for_user(
+    Extension(claims): Extension<Claims>,
+    State(service): State<service::AppState>,
+    Json(payload): Json<request::CloneRepoRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+
+    let repo_url = match &payload.repo_url {
+        Some(url) if url.ends_with(".git") => url,
+        _ => return Err(AppError::BadRequest("Invalid Git repository URL".into())),
+    };
+
+    let repo_name = match &payload.repo_name {
+        Some(name) if !name.trim().is_empty() => name,
+        _ => return Err(AppError::BadRequest("Repository name is required".into())),
+    };
+
+    println!("Cloning repository {} for user {}", repo_name, user_id);
+
+    // 调用服务层进行仓库克隆
+    let repo_path = service
+        .git_service
+        .clone_repo_for_user(&user_id, repo_url, repo_name)
+        .await?;
+    println!("handler get cloned path {}", repo_path);
+    Ok(ApiResponse::success("success cloned"))
 }
 
 // 将验证错误转换为字符串

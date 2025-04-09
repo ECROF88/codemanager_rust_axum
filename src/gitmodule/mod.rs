@@ -72,7 +72,7 @@ impl GitManager {
     // repo_url:remote repo url
     // repo_name:remote url clone into local, and give a name
     // base_path:local path
-    pub fn clone_repository_for_user(
+    pub async fn clone_repository_for_user(
         &self,
         user_id: &str,
         repo_url: &str,
@@ -88,15 +88,34 @@ impl GitManager {
                 repo_name, user_id
             )));
         }
+        // 在专用线程池中执行阻塞操作
+        let repo_path_clone = repo_path.clone();
+        let repo_url = repo_url.to_string();
+        let r = tokio::task::spawn_blocking(move || {
+            // 此操作在单独的线程中执行，不会阻塞异步运行时
+            RepoBuilder::new()
+                .clone(&repo_url, &repo_path_clone)
+                .map_err(|e| e)
+                .map(|_| repo_path_clone.to_string_lossy().to_string())
+        })
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Thread panicked: {:?}", e)))?
+        .map_err(|e| AppError::InternalServerError(format!("Clone failed: {}", e)))?; // 等待线程完成并解包结果
 
-        // 执行克隆操作
-        match RepoBuilder::new().clone(repo_url, &repo_path) {
-            Ok(_) => Ok(repo_path.to_string_lossy().to_string()),
-            Err(e) => Err(AppError::InternalServerError(format!(
-                "Clone failed: {}",
-                e
-            ))),
-        }
+        // Ok(repo_path.to_string_lossy().to_string())
+        Ok(r)
+
+        // // 执行克隆操作
+        // match RepoBuilder::new().clone(repo_url, &repo_path) {
+        //     Ok(_) => {
+        //         println!("{:?}", repo_path);
+        //         Ok(repo_path.to_string_lossy().to_string())
+        //     }
+        //     Err(e) => Err(AppError::InternalServerError(format!(
+        //         "Clone failed: {}",
+        //         e
+        //     ))),
+        // }
     }
 
     fn open_repo(&self, repo_path: &Path) -> Result<Repository, AppError> {

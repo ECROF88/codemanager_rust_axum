@@ -34,3 +34,9 @@ pub struct RepoRequest {
     // 可选参数：限制获取的提交记录数量
     pub limit: Option<usize>,
 }
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct CloneRepoRequest {
+    pub repo_url: Option<String>,
+    pub repo_name: Option<String>,
+}

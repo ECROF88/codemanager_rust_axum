@@ -37,7 +37,6 @@ pub async fn auth_middleware(
             }
         })
         .ok_or(AppError::Unauthorized("can not get token".to_string()))?;
-    // let setting = setting::load_config();
     // 验证token
     let claims = validate_token(&token)
         .map_err(|_| AppError::Unauthorized("token validate failed".to_string()))?;

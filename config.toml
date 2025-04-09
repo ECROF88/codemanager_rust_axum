@@ -1,5 +1,5 @@
-[git]
-repositories_path = "/tmp/repos"
+[git_path]
+repositories_path = "/home/mao/repos"
 
 [jwt]
 jwt_secret = "your-secure-secret-key"
