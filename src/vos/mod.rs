@@ -1,7 +1,4 @@
 use serde::Serialize;
-
-use crate::gitmodule::CommitInfo;
-
 pub mod userdata;
 
 #[derive(Debug, Serialize)]

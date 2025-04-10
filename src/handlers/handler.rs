@@ -1,4 +1,5 @@
-use crate::gitmodule::CommitInfo;
+use crate::gitmodule::structs::{CommitDetail, CommitInfo};
+// use crate::gitmodule::{CommitInfo, structs::CommitDetail};
 use crate::services::service;
 use crate::shared::error::AppError;
 use crate::shared::response::ApiResponse;
@@ -118,26 +119,77 @@ pub async fn clone_repo_for_user(
     Ok(ApiResponse::success("success cloned"))
 }
 
-// 将验证错误转换为字符串
-fn format_validation_errors(errors: ValidationErrors) -> String {
-    errors
-        .field_errors()
-        .iter()
-        .map(|(field, errors)| {
-            format!(
-                "{}: {}",
-                field,
-                errors
-                    .iter()
-                    .map(|e| e
-                        .message
-                        .as_ref()
-                        .map_or("Unknown error", |v| v)
-                        .to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
+pub async fn commit_for_user_repo(
+    Extension(claims): Extension<Claims>,
+    State(service): State<service::AppState>,
+    Json(payload): Json<request::CloneRepoRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+    todo!()
 }
+
+#[axum::debug_handler]
+pub async fn get_repo_commit_diff(
+    Extension(claims): Extension<Claims>,
+    State(service): State<service::AppState>,
+    Query(params): Query<request::GetReopDiffRequest>,
+) -> Result<ApiResponse<CommitDetail>, AppError> {
+    let user_id = claims.sub;
+
+    if params.commit_id.is_none() {
+        return Err(AppError::BadRequest("Commit ID is required".into()));
+    }
+
+    if params.repo_name.is_none() {
+        return Err(AppError::BadRequest("Repo Name is required".into()));
+    }
+
+    // let repo_name = params
+    //     .repo_name
+    //     .as_ref()
+    //     .ok_or_else(|| AppError::BadRequest("Repository name is required".into()))?;
+
+    // let commit_id = params
+    //     .commit_id
+    //     .as_ref()
+    //     .ok_or_else(|| AppError::BadRequest("Commit ID is required".into()))?;
+    // println!(
+    //     "Getting diff for commit {} in repo {}",
+    //     params.commit_id.unwrap(),
+    //     params.repo_name.unwrap()
+    // );
+
+    let repo_name = params.repo_name.as_ref().unwrap();
+    let commit_id = params.commit_id.as_ref().unwrap();
+    let commit_diff_details = service
+        .git_service
+        .get_repo_commit_diff(&user_id, repo_name, commit_id)
+        .await?;
+
+    // todo!()
+    Ok(ApiResponse::success_data(commit_diff_details))
+}
+
+// // 将验证错误转换为字符串
+// fn format_validation_errors(errors: ValidationErrors) -> String {
+//     errors
+//         .field_errors()
+//         .iter()
+//         .map(|(field, errors)| {
+//             format!(
+//                 "{}: {}",
+//                 field,
+//                 errors
+//                     .iter()
+//                     .map(|e| e
+//                         .message
+//                         .as_ref()
+//                         .map_or("Unknown error", |v| v)
+//                         .to_string())
+//                     .collect::<Vec<_>>()
+//                     .join(", ")
+//             )
+//         })
+//         .collect::<Vec<_>>()
+//         .join("; ")
+// }

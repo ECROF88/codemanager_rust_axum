@@ -2,7 +2,9 @@ use r2d2::Pool;
 use redis::{Client, Commands};
 
 use crate::dtos::request::{self};
-use crate::gitmodule::{CommitInfo, GitManager};
+use crate::gitmodule::GitManager;
+use crate::gitmodule::structs::{CommitDetail, CommitInfo};
+// use crate::gitmodule::{CommitDetail, CommitInfo, GitManager};
 use crate::models::user::User;
 use crate::shared::error::AppError;
 use crate::shared::{jwt, setting};
@@ -267,5 +269,16 @@ impl GitService {
 
     pub async fn get_repos_data_for_users(&self, user_id: &str) -> Result<Vec<ReposVo>, AppError> {
         self.git_manager.get_repos_data_for_users(user_id)
+    }
+
+    pub async fn get_repo_commit_diff(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        commit_id: &str,
+    ) -> Result<CommitDetail, AppError> {
+        self.git_manager
+            .get_commit_detail(user_id, repo_name, commit_id)
+            .await
     }
 }

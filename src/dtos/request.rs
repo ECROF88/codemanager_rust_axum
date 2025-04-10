@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 #[derive(Debug, Deserialize, Validate)]
@@ -39,4 +39,16 @@ pub struct RepoRequest {
 pub struct CloneRepoRequest {
     pub repo_url: Option<String>,
     pub repo_name: Option<String>,
+}
+
+// todo();
+pub struct CommitRepoRequest {}
+
+#[derive(Debug, Serialize, Deserialize, Validate)]
+pub struct GetReopDiffRequest {
+    #[validate(required(message = "Repository name is required"))]
+    pub repo_name: Option<String>,
+
+    #[validate(required(message = "Commit ID is required"))]
+    pub commit_id: Option<String>,
 }
