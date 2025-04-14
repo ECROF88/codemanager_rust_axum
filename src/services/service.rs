@@ -3,7 +3,7 @@ use redis::{Client, Commands};
 
 use crate::dtos::request::{self};
 use crate::gitmodule::GitManager;
-use crate::gitmodule::structs::{CommitDetail, CommitInfo};
+use crate::gitmodule::structs::{CommitDetail, CommitInfo, GitFileEntry, WebSocketManager};
 // use crate::gitmodule::{CommitDetail, CommitInfo, GitManager};
 use crate::models::user::User;
 use crate::shared::error::AppError;
@@ -15,6 +15,7 @@ use crate::vos::userdata::UserData;
 pub struct AppState {
     pub auth_service: AuthService,
     pub git_service: GitService,
+    pub ws_manager: WebSocketManager,
 }
 
 #[derive(Clone)]
@@ -217,9 +218,10 @@ impl GitService {
         user_id: &str,
         repo_url: &str,
         repo_name: &str,
+        ws_manager: &WebSocketManager,
     ) -> Result<String, AppError> {
         self.git_manager
-            .clone_repository_for_user(user_id, repo_url, repo_name)
+            .clone_repository_for_user(user_id, repo_url, repo_name, ws_manager)
             .await
     }
 
@@ -280,5 +282,27 @@ impl GitService {
         self.git_manager
             .get_commit_detail(user_id, repo_name, commit_id)
             .await
+    }
+
+    pub async fn list_repository_files(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        directory_path: Option<&str>,
+        branch: Option<&str>,
+    ) -> Result<Vec<GitFileEntry>, AppError> {
+        self.git_manager
+            .list_repository_files(user_id, repo_name, directory_path, branch)
+    }
+
+    pub async fn get_file_content(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        file_path: &str,
+        branch: Option<&str>,
+    ) -> Result<String, AppError> {
+        self.git_manager
+            .get_file_content(user_id, repo_name, file_path, branch)
     }
 }

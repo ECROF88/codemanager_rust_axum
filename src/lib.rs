@@ -4,6 +4,7 @@ use axum::{
     middleware,
     routing::{get, post},
 };
+use gitmodule::structs::WebSocketManager;
 use services::service::{AppState, GitService};
 use tower::ServiceBuilder;
 use tower_http::{cors::Any, cors::CorsLayer, trace::TraceLayer};
@@ -33,6 +34,7 @@ pub fn create_router() -> Router {
     let app_state = AppState {
         auth_service: AuthService::new(),
         git_service: GitService::new(),
+        ws_manager: WebSocketManager::new(),
     };
 
     Router::new()
@@ -40,6 +42,7 @@ pub fn create_router() -> Router {
         .nest(
             "/api",
             Router::new()
+                .route("/ws/{user_id}", get(handler::websocket_handler))
                 // 认证路由
                 .nest(
                     "/auth",
@@ -59,8 +62,10 @@ pub fn create_router() -> Router {
                             get(handler::get_repo_commit_histories),
                         )
                         .route("/repo/repos", get(handler::get_repos))
-                        .route("/repo/gitclone", post(handler::clone_repo_for_user))
+                        .route("/repo/clone", post(handler::clone_repo_for_user))
                         // .route("/repo/commit", post(handler::commit_for_user_repo))
+                        .route("/repo/files", get(handler::get_repo_files_tree))
+                        .route("/repo/filecontent", get(handler::get_repo_file_content))
                         .route("/repo/getdiff", get(handler::get_repo_commit_diff))
                         .layer(middleware::from_fn(auth_middleware::auth_middleware)),
                 ),

@@ -5,11 +5,12 @@ use std::{
 
 use crate::{shared::error::AppError, vos::ReposVo};
 // use axum::extract::Path;
-use config::Config;
-use git2::{IndexAddOption, Repository, Signature, build::RepoBuilder};
-use hyper::header;
+use git2::{
+    Cred, FetchOptions, IndexAddOption, RemoteCallbacks, Repository, Signature, build::RepoBuilder,
+};
 use serde::{Deserialize, Serialize};
-use structs::{CommitDetail, CommitFileChange, CommitInfo, GitFileEntry};
+use structs::{CommitDetail, CommitFileChange, CommitInfo, GitFileEntry, WebSocketManager};
+use tracing::info;
 
 pub mod structs;
 
@@ -18,29 +19,6 @@ pub struct GitConfig {
     pub name: String,
     pub email: String,
 }
-
-// #[derive(Debug, Serialize)]
-// pub struct CommitInfo {
-//     pub id: String,
-//     pub author: String,
-//     pub message: String,
-//     pub time: i64,
-// }
-
-// #[derive(Debug, Serialize)]
-// pub struct GitOperationResult {
-//     pub success: bool,
-//     pub message: String,
-//     pub data: Option<serde_json::Value>,
-// }
-
-// #[derive(Debug, Serialize)]
-// pub struct GitFileEntry {
-//     pub name: String,
-//     pub path: String,
-//     pub is_dir: bool,
-//     pub size: Option<u64>, // 仅对文件有效
-// }
 
 #[derive(Clone)]
 pub struct GitManager {
@@ -89,6 +67,7 @@ impl GitManager {
         user_id: &str,
         repo_url: &str,
         repo_name: &str,
+        ws_manager: &WebSocketManager,
     ) -> Result<String, AppError> {
         let user_path = self.ensure_user_directory(user_id)?;
         let repo_path = user_path.join(repo_name);
@@ -100,21 +79,80 @@ impl GitManager {
                 repo_name, user_id
             )));
         }
-        // 在专用线程池中执行阻塞操作
+
+        // 创建一个初始状态文件或记录，表示克隆开始了
+        // let status_path = user_path.join(format!("{}.cloning", repo_name));
+        // std::fs::write(&status_path, "CLONING").map_err(|e| {
+        //     AppError::InternalServerError(format!("Failed to create status file: {}", e))
+        // })?;
+
+        // 在后台启动克隆操作，不等待完成
         let repo_path_clone = repo_path.clone();
         let repo_url = repo_url.to_string();
-        let r = tokio::task::spawn_blocking(async move || {
-            RepoBuilder::new()
-                .clone(&repo_url, &repo_path_clone)
-                .map_err(|e| e)
-                .map(|_| repo_path_clone.to_string_lossy().to_string())
-        })
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Thread panicked: {:?}", e)))?
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Clone failed: {}", e)))?; // 等待线程完成并解包结果
+        let user_id_cloned = user_id.to_string();
+        let repo_name_cloned = repo_name.to_string();
+        // let status_path = status_path.clone();
+        let ws_manager_cloned = ws_manager.clone();
+        // 使用tokio::spawn在后台执行，不等待其完成
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let result = RepoBuilder::new()
+                    .clone(&repo_url, &repo_path_clone)
+                    .map_err(|e| e)
+                    .map(|_| repo_path_clone.to_string_lossy().to_string());
 
-        Ok(r)
+                // 如果克隆失败，删除可能已经创建的目录
+                if result.is_err() && repo_path_clone.exists() {
+                    let _ = fs::remove_dir_all(&repo_path_clone);
+                }
+
+                result
+            })
+            .await;
+
+            info!("tokio 完成了clone result:{:?}", result);
+            // 克隆完成后，更新状态文件
+            let status = match result {
+                Ok(Ok(_)) => "COMPLETED",
+                _ => "FAILED",
+            };
+
+            // let _ = std::fs::write(&status_path, status);
+
+            // websocket 通知前端
+            ws_manager_cloned
+                .send_clone_status(&user_id_cloned, &repo_name_cloned, status)
+                .await;
+        });
+
+        // 立即返回响应，不等待克隆完成
+        Ok(format!(
+            "Repository clone started: {}/{}",
+            &user_id, &repo_name
+        ))
+    }
+
+    pub fn check_clone_status(&self, user_id: &str, repo_name: &str) -> Result<String, AppError> {
+        let user_path = self.base_path.join(user_id);
+        let repo_path = user_path.join(repo_name);
+        let status_path = user_path.join(format!("{}.cloning", repo_name));
+
+        if repo_path.exists() && Repository::open(&repo_path).is_ok() {
+            // 仓库已存在且可打开，说明克隆完成
+            return Ok("COMPLETED".to_string());
+        } else if status_path.exists() {
+            // 读取状态文件
+            match std::fs::read_to_string(&status_path) {
+                Ok(status) => Ok(status),
+                Err(_) => Ok("UNKNOWN".to_string()),
+            }
+        } else if repo_path.exists() {
+            // 目录存在但不是有效仓库，可能克隆失败
+            Ok("FAILED".to_string())
+        } else {
+            // 没有找到相关信息
+            Ok("NOT_STARTED".to_string())
+        }
     }
 
     fn open_repo(&self, repo_path: &Path) -> Result<Repository, AppError> {
@@ -387,38 +425,76 @@ impl GitManager {
             .map_err(|e| AppError::InternalServerError(format!("Failed to get tree: {}", e)))?;
 
         // 如果指定了目录路径，获取该目录的树
-        let dir_tree = if let Some(path) = directory_path {
-            if path.is_empty() {
-                tree
-            } else {
-                let entry = tree
-                    .get_path(Path::new(path))
-                    .map_err(|_| AppError::NotFound(format!("Directory not found: {}", path)))?;
+        // let dir_tree = if let Some(path) = directory_path {
+        //     if path.is_empty() {
+        //         tree
+        //     } else {
+        //         let entry = tree
+        //             .get_path(Path::new(path))
+        //             .map_err(|_| AppError::NotFound(format!("Directory not found: {}", path)))?;
 
-                entry
-                    .to_object(&repo)
-                    .map_err(|e| {
-                        AppError::InternalServerError(format!("Failed to get object: {}", e))
-                    })?
-                    .as_tree()
-                    .ok_or(AppError::BadRequest("Path is not a directory".to_string()))?
-                    .clone()
-            }
-        } else {
-            tree
-        };
+        //         entry
+        //             .to_object(&repo)
+        //             .map_err(|e| {
+        //                 AppError::InternalServerError(format!("Failed to get object: {}", e))
+        //             })?
+        //             .as_tree()
+        //             .ok_or(AppError::BadRequest("Path is not a directory".to_string()))?
+        //             .clone()
+        //     }
+        // } else {
+        //     tree
+        // };
+        self.get_tree_entries(&repo, &tree, directory_path)
+        // let mut files = Vec::new();
 
+        // // 遍历树中的条目
+        // for entry in dir_tree.iter() {
+        //     let entry_name = entry.name().unwrap_or_default().to_string();
+        //     let entry_path = match directory_path {
+        //         Some(path) if !path.is_empty() => format!("{}/{}", path, entry_name),
+        //         _ => entry_name.clone(),
+        //     };
+
+        //     let object = entry.to_object(&repo).map_err(|e| {
+        //         AppError::InternalServerError(format!("Failed to get object: {}", e))
+        //     })?;
+
+        //     let is_dir = object.as_tree().is_some();
+        //     let size = if !is_dir {
+        //         object.as_blob().map(|b| b.content().len() as u64)
+        //     } else {
+        //         None
+        //     };
+
+        //     files.push(GitFileEntry {
+        //         name: entry_name,
+        //         path: entry_path,
+        //         is_dir,
+        //         size,
+        //     });
+        // }
+
+        // Ok(files)
+    }
+
+    fn get_tree_entries(
+        &self,
+        repo: &Repository,
+        tree: &git2::Tree,
+        prefix: Option<&str>,
+    ) -> Result<Vec<GitFileEntry>, AppError> {
         let mut files = Vec::new();
 
-        // 遍历树中的条目
-        for entry in dir_tree.iter() {
+        // 遍历当前树中的条目
+        for entry in tree.iter() {
             let entry_name = entry.name().unwrap_or_default().to_string();
-            let entry_path = match directory_path {
+            let entry_path = match prefix {
                 Some(path) if !path.is_empty() => format!("{}/{}", path, entry_name),
                 _ => entry_name.clone(),
             };
 
-            let object = entry.to_object(&repo).map_err(|e| {
+            let object = entry.to_object(repo).map_err(|e| {
                 AppError::InternalServerError(format!("Failed to get object: {}", e))
             })?;
 
@@ -429,11 +505,31 @@ impl GitManager {
                 None
             };
 
+            // 添加当前条目
+            // files.push(GitFileEntry {
+            //     name: entry_name,
+            //     path: entry_path.clone(),
+            //     is_dir,
+            //     size,
+            // });
+
+            // 如果是目录，递归获取其内容
+            // 为目录递归获取子项
+            let children = if is_dir {
+                if let Some(subtree) = object.as_tree() {
+                    self.get_tree_entries(repo, &subtree, Some(&entry_path))?
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
             files.push(GitFileEntry {
                 name: entry_name,
                 path: entry_path,
                 is_dir,
                 size,
+                children,
             });
         }
 

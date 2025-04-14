@@ -52,3 +52,27 @@ pub struct GetReopDiffRequest {
     #[validate(required(message = "Commit ID is required"))]
     pub commit_id: Option<String>,
 }
+
+#[derive(Debug, Serialize, Deserialize, Validate)]
+pub struct GetRepoFilesRequest {
+    #[validate(required(message = "Repository name is required"))]
+    pub repo_name: Option<String>,
+
+    // 要浏览的目录路径，默认为根目录
+    pub path: Option<String>,
+
+    // 分支名称，默认使用当前分支
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct GetFileContentRequest {
+    #[validate(required(message = "Repository name is required"))]
+    pub repo_name: Option<String>,
+
+    #[validate(required(message = "File path is required"))]
+    pub file_path: Option<String>,
+
+    // 可选的分支名称
+    pub branch: Option<String>,
+}
