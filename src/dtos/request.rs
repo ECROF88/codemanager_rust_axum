@@ -34,6 +34,8 @@ pub struct RepoRequest {
 
     // 可选参数：限制获取的提交记录数量
     pub limit: Option<usize>,
+
+    pub page: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -82,15 +84,21 @@ pub struct GetFileContentRequest {
 pub struct UserUpdateRequest {
     #[validate(email(message = "Invalid email format"))]
     pub email: Option<String>,
-    // 密码（可选）
-    #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
-    pub password: Option<String>,
+    // #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
+    // pub password: Option<String>,
 
     // 头像URL（可选）
     pub avatar: Option<String>,
 
     // 部门ID（可选）
     pub department_id: Option<i32>,
+}
+
+pub struct UserUpatePasswordRequest {
+    // #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
+    pub old_password: Option<String>,
+    // #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
+    pub new_password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]

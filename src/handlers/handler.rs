@@ -14,6 +14,7 @@ use axum::extract::{Path, Query, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use tokio::sync::mpsc;
+use tracing::info;
 use validator::{Validate, ValidationErrors};
 
 #[axum::debug_handler]
@@ -58,6 +59,10 @@ pub async fn update_user_data(
     State(service): State<Arc<service::AppState>>,
     Json(payload): Json<request::UserUpdateRequest>,
 ) -> Result<(), AppError> {
+    let user_id = claims.sub;
+
+    let mut user_data = service.redis.get_user_data(user_id).await?;
+    // 调用service update
     todo!()
 }
 
@@ -74,12 +79,13 @@ pub async fn get_repo_commit_histories(
     println!("User ID: {}", user_id);
 
     // 获取仓库提交历史
-    let limit = params.limit.unwrap_or(50); // 默认获取50条提交记录
+    let limit = params.limit.unwrap_or(10); // 默认获取50条提交记录
+    let page = params.page.unwrap_or(1); // 默认第一页
     // let commit_history = service.get_repo_history(&payload.repo_name, limit).await?;
     if let Some(repo_name) = params.repo_name {
         let commit_history = service
             .git_service
-            .get_repo_commit_histories(&user_id, &repo_name, limit)
+            .get_repo_commit_histories(&user_id, &repo_name, limit, page)
             .await?;
 
         Ok(ApiResponse::success_data(commit_history))
@@ -248,7 +254,7 @@ pub async fn get_repo_file_content(
         .git_service
         .get_file_content(&user_id, repo_name, file_path, branch)
         .await?;
-
+    info!("{}", &content[..10]);
     // 推断内容类型
     let content_type = infer_content_type(file_path);
 

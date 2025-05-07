@@ -6,9 +6,9 @@ use redis::{Client, Commands};
 use sqlx::{PgPool, Row, query, query_as};
 use tracing::info;
 
-use crate::dtos::request::{self, RegisterRequest};
-use crate::gitmodule::GitManager;
+use crate::dtos::request::{self, RegisterRequest, UserUpdateRequest};
 use crate::gitmodule::structs::{CommitDetail, CommitInfo, GitFileEntry, WebSocketManager};
+use crate::gitmodule::{GitManager, structs};
 use crate::models::user::User;
 use crate::shared::error::AppError;
 use crate::shared::{jwt, setting};
@@ -91,15 +91,6 @@ impl AppState {
     }
 
     pub async fn register(&self, payload: request::RegisterRequest) -> Result<(), AppError> {
-        // let existing_user = sqlx::query("SELECT username FROM users WHERE username = $1")
-        //     .bind(&payload.username)
-        //     .fetch_optional(&self.pg_db)
-        //     .await
-        //     .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
-
-        // if let Some(_) = existing_user {
-        //     return Err(AppError::BadRequest("Username already exists".to_string()));
-        // }
         self.chack_if_exist(&payload.username).await?;
 
         let result = sqlx::query(
@@ -145,6 +136,10 @@ impl AppState {
             .await?;
 
         Ok(())
+    }
+
+    async fn update_user_data(&self, new_data: UserUpdateRequest) -> Result<(), AppError> {
+        todo!()
     }
 
     async fn validate_user_pass(&self, username: &str, password: &str) -> Result<(), AppError> {
@@ -517,14 +512,37 @@ impl GitService {
         )
     }
 
+    pub async fn get_repo_commit_count(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+    ) -> Result<usize, AppError> {
+        //先从redis里面找，再去数据库里面找。都没有再去git_manager里面找
+        let total_count = self
+            .git_manager
+            .get_total_commits_count(user_id, repo_name)?;
+        Ok(total_count)
+    }
+
     pub async fn get_repo_commit_histories(
         &self,
         user_id: &str,
         repo_name: &str,
         limit: usize,
+        page: usize,
     ) -> Result<Vec<CommitInfo>, AppError> {
+        let total_count = self.get_repo_commit_count(user_id, repo_name).await?;
+        info!("get count ={}", total_count);
+        if total_count == 0 {
+            return Ok(vec![]);
+        }
+        if (page - 1) * limit > total_count {
+            return Err(AppError::BadRequest(
+                "Page number exceeds total commit count".to_string(),
+            ));
+        }
         self.git_manager
-            .get_commit_histories(user_id, repo_name, limit)
+            .get_commit_histories(user_id, repo_name, limit, page, total_count)
     }
 
     pub async fn get_repos_data_for_users(&self, user_id: &str) -> Result<Vec<ReposVo>, AppError> {

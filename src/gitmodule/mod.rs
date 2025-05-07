@@ -23,7 +23,6 @@ pub struct GitConfig {
 #[derive(Clone)]
 pub struct GitManager {
     base_path: PathBuf, // 仓库存储的基础路径
-                        // config: GitConfig,  // 默认Git配置
 }
 
 impl GitManager {
@@ -272,11 +271,33 @@ impl GitManager {
         Ok(commit_id.to_string())
     }
 
+    pub fn get_total_commits_count(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+    ) -> Result<usize, AppError> {
+        let repo_path = self.get_user_repo_path(user_id, repo_name);
+        let repo = self.open_repo(&repo_path)?;
+
+        let mut revwalk = repo.revwalk().map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create revwalk: {}", e))
+        })?;
+
+        revwalk
+            .push_head()
+            .map_err(|e| AppError::InternalServerError(format!("Failed to push head: {}", e)))?;
+        let count = revwalk.count();
+        info!("count is {}", count);
+        Ok(count)
+    }
+
     pub fn get_commit_histories(
         &self,
         user_id: &str,
         repo_name: &str,
         limit: usize,
+        page: usize,
+        total_count: usize,
     ) -> Result<Vec<CommitInfo>, AppError> {
         // bsaepath/user_id/repo_name
         let repo_path = self.base_path.join(user_id).join(repo_name);
@@ -287,15 +308,26 @@ impl GitManager {
         })?;
 
         revwalk
+            .set_sorting(git2::Sort::TIME)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to set sorting: {}", e)))?;
+
+        revwalk
             .push_head()
             .map_err(|e| AppError::InternalServerError(format!("Failed to push head: {}", e)))?;
 
+        let start_index = (page - 1) * limit;
+        let end_index = start_index + limit;
+
         let mut commits = Vec::new();
         for (i, oid) in revwalk.enumerate() {
-            if i >= limit {
-                break;
+            if i < start_index {
+                continue;
             }
 
+            // 达到页末，结束遍历
+            if i >= end_index {
+                break;
+            }
             let oid = oid.map_err(|e| {
                 AppError::InternalServerError(format!("Failed to get commit ID: {}", e))
             })?;
@@ -1002,6 +1034,7 @@ impl GitManager {
             &format!("Fast-forward pull of '{}' to {}", branch_name, target_oid),
         )
         .map_err(|e| AppError::InternalServerError(format!("Failed to update reference: {}", e)))?;
+
         // 更新工作目录
         let mut checkout_opts = git2::build::CheckoutBuilder::new();
         checkout_opts.force();
