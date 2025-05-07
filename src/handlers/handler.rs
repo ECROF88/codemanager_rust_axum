@@ -4,10 +4,12 @@ use crate::gitmodule::structs::{CommitDetail, CommitInfo, GitFileEntry, WebSocke
 // use crate::gitmodule::{CommitInfo, structs::CommitDetail};
 use crate::services::service;
 use crate::shared::error::AppError;
+use crate::shared::jwt::validate_token;
 use crate::shared::response::ApiResponse;
 use crate::vos::ReposVo;
 use crate::vos::userdata::UserData;
 use crate::{dtos::request, shared::jwt::Claims};
+use axum::ServiceExt;
 use axum::extract::{Path, Query, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::{Extension, Json, extract::State, http::StatusCode};
@@ -16,21 +18,21 @@ use validator::{Validate, ValidationErrors};
 
 #[axum::debug_handler]
 pub async fn register(
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Json(payload): Json<request::RegisterRequest>,
 ) -> Result<ApiResponse<()>, AppError> {
     println!("Registering user: {}", payload.username);
-    service.auth_service.register(payload).await?;
+    service.register(payload).await?;
 
     Ok(ApiResponse::success("Registration successful"))
 }
 
 #[axum::debug_handler]
 pub async fn login(
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Json(payload): Json<request::LoginRequest>,
 ) -> Result<ApiResponse<String>, AppError> {
-    let token = service.auth_service.login(payload).await?;
+    let token = service.login(payload).await?;
 
     Ok(ApiResponse::success_data(token))
 }
@@ -38,22 +40,31 @@ pub async fn login(
 #[axum::debug_handler]
 pub async fn get_user_data(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
 ) -> Result<ApiResponse<UserData>, AppError> {
     println!("get user data handler");
     // 从 JWT claims 中获取用户 ID
     let user_id = claims.sub;
     println!("claims.sub={}", user_id);
     // 获取用户数据
-    let user_data = service.auth_service.get_user_data(user_id).await?;
+    let user_data = service.redis.get_user_data(user_id).await?;
 
     Ok(ApiResponse::success_data(user_data))
 }
 
 #[axum::debug_handler]
+pub async fn update_user_data(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::UserUpdateRequest>,
+) -> Result<(), AppError> {
+    todo!()
+}
+
+#[axum::debug_handler]
 pub async fn get_repo_commit_histories(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     // Json(payload): Json<request::RepoRequest>,
     Query(params): Query<request::RepoRequest>,
 ) -> Result<ApiResponse<Vec<CommitInfo>>, AppError> {
@@ -80,7 +91,7 @@ pub async fn get_repo_commit_histories(
 #[axum::debug_handler]
 pub async fn get_repos(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     // Json(payload): Json<request::RepoRequest>,
 ) -> Result<ApiResponse<Vec<ReposVo>>, AppError> {
     let user_id = claims.sub;
@@ -97,7 +108,7 @@ pub async fn get_repos(
 #[axum::debug_handler]
 pub async fn clone_repo_for_user(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Json(payload): Json<request::CloneRepoRequest>,
 ) -> Result<ApiResponse<()>, AppError> {
     let user_id = claims.sub;
@@ -126,7 +137,7 @@ pub async fn clone_repo_for_user(
 
 pub async fn commit_for_user_repo(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Json(payload): Json<request::CloneRepoRequest>,
 ) -> Result<ApiResponse<()>, AppError> {
     let user_id = claims.sub;
@@ -136,7 +147,7 @@ pub async fn commit_for_user_repo(
 #[axum::debug_handler]
 pub async fn get_repo_commit_diff(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Query(params): Query<request::GetReopDiffRequest>,
 ) -> Result<ApiResponse<CommitDetail>, AppError> {
     let user_id = claims.sub;
@@ -178,7 +189,7 @@ pub async fn get_repo_commit_diff(
 #[axum::debug_handler]
 pub async fn get_repo_files_tree(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Query(params): Query<request::GetRepoFilesRequest>,
 ) -> Result<ApiResponse<Vec<GitFileEntry>>, AppError> {
     let user_id = claims.sub;
@@ -210,7 +221,7 @@ pub async fn get_repo_files_tree(
 #[axum::debug_handler]
 pub async fn get_repo_file_content(
     Extension(claims): Extension<Claims>,
-    State(service): State<service::AppState>,
+    State(service): State<Arc<service::AppState>>,
     Query(params): Query<request::GetFileContentRequest>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
     let user_id = claims.sub;
@@ -275,16 +286,25 @@ fn infer_content_type(file_path: &str) -> &'static str {
 
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
-    Path(user_id): Path<String>,
-    State(service): State<service::AppState>,
+    Path(token): Path<String>,
+    State(service): State<Arc<service::AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, user_id, service))
+    match validate_token(&token) {
+        Ok(claims) => {
+            let user_id = claims.sub;
+            ws.on_upgrade(move |socket| handle_socket(socket, user_id, service))
+        }
+        Err(_) => {
+            // Return a 401 Unauthorized response
+            (StatusCode::UNAUTHORIZED, "Invalid token").into_response()
+        }
+    }
 }
 
 async fn handle_socket(
     socket: axum::extract::ws::WebSocket,
     user_id: String,
-    app_state: service::AppState,
+    app_state: Arc<service::AppState>,
 ) {
     use axum::extract::ws::Message;
     use futures::{SinkExt, StreamExt};
@@ -342,4 +362,93 @@ async fn handle_socket(
     //     _ = (&mut send_task) => recv_task.abort(),
     //     _ = (&mut recv_task) => send_task.abort(),
     // }
+}
+
+#[axum::debug_handler]
+pub async fn update_repo_data(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::RepoRenameRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+
+    if let None = payload.repo_name {
+        return Err(AppError::BadRequest("repo_name is required".into()));
+    }
+    if let None = payload.new_repo_name {
+        return Err(AppError::BadRequest("new_repo_name is required".into()));
+    }
+    service
+        .git_service
+        .update_repo_data(
+            &user_id,
+            &payload.repo_name.unwrap(),
+            &payload.new_repo_name.unwrap(),
+        )
+        .await?;
+
+    Ok(ApiResponse::success("Repository updated successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn del_repo_for_user(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::RepoDelResquest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+    if let None = payload.repo_name {
+        return Err(AppError::BadRequest("repo_name is required".into()));
+    }
+    service
+        .git_service
+        .del_repo_for_user(&user_id, &payload.repo_name.unwrap())
+        .await?;
+
+    Ok(ApiResponse::success("Repository deleted successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn get_repo_branches(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Query(params): Query<request::GetRepoBranchesRequest>,
+) -> Result<ApiResponse<Vec<String>>, AppError> {
+    let user_id = claims.sub;
+
+    if let None = params.repo_name {
+        return Err(AppError::BadRequest("repo_name is required".into()));
+    }
+
+    let branches = service
+        .git_service
+        .get_repo_branches(&user_id, &params.repo_name.unwrap())
+        .await?;
+
+    Ok(ApiResponse::success_data(branches))
+}
+
+// git pull 拉取更新
+#[axum::debug_handler]
+pub async fn pull_repo(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::PullRepoRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+
+    if let None = payload.repo_name {
+        return Err(AppError::BadRequest("repo_name is required".into()));
+    }
+
+    service
+        .git_service
+        .pull_repo(
+            &user_id,
+            &payload.repo_name.unwrap(),
+            payload.branch_name.as_deref(),
+        )
+        .await?;
+
+    Ok(ApiResponse::success("Repository pulled successfully"))
 }

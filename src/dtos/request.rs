@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::field::debug;
 use validator::Validate;
 
 #[derive(Debug, Deserialize, Validate)]
@@ -9,7 +10,7 @@ pub struct RegisterRequest {
     #[validate(email(message = "Invalid email format"))]
     pub email: String,
 
-    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
+    #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
     pub password: String,
 }
 
@@ -75,4 +76,52 @@ pub struct GetFileContentRequest {
 
     // 可选的分支名称
     pub branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UserUpdateRequest {
+    #[validate(email(message = "Invalid email format"))]
+    pub email: Option<String>,
+    // 密码（可选）
+    #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
+    pub password: Option<String>,
+
+    // 头像URL（可选）
+    pub avatar: Option<String>,
+
+    // 部门ID（可选）
+    pub department_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct RepoDelResquest {
+    #[validate(required(message = "repo_name is required"))]
+    pub repo_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct RepoRenameRequest {
+    #[validate(required(message = "repo_name is required"))]
+    pub repo_name: Option<String>,
+
+    #[validate(required(message = "new_repo_name is required"))]
+    pub new_repo_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct GetRepoBranchesRequest {
+    #[validate(required(message = "repo_name is required"))]
+    pub repo_name: Option<String>,
+
+    #[validate(required(message = "branch_name is required"))]
+    pub branch_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PullRepoRequest {
+    #[validate(required(message = "repo_name is required"))]
+    pub repo_name: Option<String>,
+
+    #[validate(required(message = "branch_name is required"))]
+    pub branch_name: Option<String>,
 }

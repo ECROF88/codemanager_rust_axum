@@ -52,8 +52,8 @@ async fn main() {
     // let config = setting::load_config();
     // build our application with a single route
     // let app = Router::new().route("/", get(|| async { "Hello, World!" }));
-    let app = create_router();
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 3000));
+    let app = create_router().await.expect("Fail to create Router");
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 3003));
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     info!("start to run!{}", addr);
     axum::serve(listener, app).await.unwrap();

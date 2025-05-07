@@ -868,29 +868,149 @@ impl GitManager {
 
         Ok(())
     }
-    // 辅助方法：状态码转字符串
-    // fn status_to_string(&self, status: git2::Status) -> String {
-    //     let mut status_str = String::new();
 
-    //     if status.is_index_new() {
-    //         status_str.push_str("新增索引 ");
-    //     }
-    //     if status.is_index_modified() {
-    //         status_str.push_str("修改索引 ");
-    //     }
-    //     if status.is_index_deleted() {
-    //         status_str.push_str("删除索引 ");
-    //     }
-    //     if status.is_wt_new() {
-    //         status_str.push_str("新增工作区 ");
-    //     }
-    //     if status.is_wt_modified() {
-    //         status_str.push_str("修改工作区 ");
-    //     }
-    //     if status.is_wt_deleted() {
-    //         status_str.push_str("删除工作区 ");
-    //     }
+    pub async fn del_repo(&self, user_id: &str, repo_name: &str) -> Result<(), AppError> {
+        let repo_path = self.get_user_repo_path(user_id, repo_name);
+        // 删除仓库目录
+        if tokio::fs::remove_dir_all(&repo_path).await.is_err() {
+            return Err(AppError::InternalServerError(format!(
+                "Failed to delete repository: {}",
+                repo_name
+            )));
+        }
 
-    //     status_str.trim().to_string()
-    // }
+        Ok(())
+    }
+
+    pub async fn update_repo_data(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        new_name: &str,
+    ) -> Result<(), AppError> {
+        let repo_path = self.get_user_repo_path(user_id, repo_name);
+
+        // Verify the repository exists
+        if !repo_path.exists() {
+            return Err(AppError::NotFound(format!(
+                "Repository not found: {}",
+                repo_name
+            )));
+        }
+
+        if repo_name == new_name {
+            return Ok(());
+        }
+
+        let new_repo_path = self.get_user_repo_path(user_id, new_name);
+
+        if new_repo_path.exists() {
+            return Err(AppError::BadRequest(format!(
+                "A repository with the name '{}' already exists",
+                new_name
+            )));
+        }
+
+        tokio::fs::rename(&repo_path, &new_repo_path)
+            .await
+            .map_err(|e| {
+                AppError::InternalServerError(format!("Failed to rename repository: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    pub async fn get_repo_branchs(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let repo_path = self.get_user_repo_path(user_id, repo_name);
+        let repo = self.open_repo(&repo_path)?;
+
+        // 获取所有本地分支
+        let mut branches = Vec::new();
+        for branch in repo
+            .branches(None)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get branches: {}", e)))?
+        {
+            let (branch, t_) = branch.map_err(|e| {
+                AppError::InternalServerError(format!("Failed to get branch: {}", e))
+            })?;
+            let branch_name = branch.name().map_err(|e| {
+                AppError::InternalServerError(format!("Failed to get branch name: {}", e))
+            })?;
+            if let Some(name) = branch_name {
+                branches.push(name.to_string());
+            }
+        }
+
+        Ok(branches)
+    }
+
+    pub async fn pull_repo(
+        &self,
+        user_id: &str,
+        repo_name: &str,
+        branch: Option<&str>,
+    ) -> Result<(), AppError> {
+        let repo_path = self.get_user_repo_path(user_id, repo_name);
+        let repo = self.open_repo(&repo_path)?;
+
+        // 获取当前分支
+        let branch_name = match branch {
+            Some(name) => name.to_string(),
+            None => {
+                let head = repo.head().map_err(|e| {
+                    AppError::InternalServerError(format!("Failed to get HEAD: {}", e))
+                })?;
+                if !head.is_branch() {
+                    return Err(AppError::BadRequest("HEAD is not a branch".to_string()));
+                }
+                head.shorthand()
+                    .ok_or(AppError::InternalServerError(
+                        "HEAD is not a branch".to_string(),
+                    ))?
+                    .to_string()
+            }
+        };
+
+        let mut remote = repo
+            .find_remote("origin")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to find remote: {}", e)))?;
+
+        remote
+            .fetch(&[&branch_name], None, None)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to fetch: {}", e)))?;
+
+        // 构造远程分支引用名称 (例如 "refs/remotes/origin/main")
+        let remote_ref_name = format!("refs/remotes/origin/{}", branch_name);
+
+        // 查找远程分支引用
+        let remote_ref = repo.find_reference(&remote_ref_name).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to find remote reference: {}", e))
+        })?;
+
+        // 获取远程分支的目标提交ID
+        let target_oid = remote_ref
+            .target()
+            .ok_or_else(|| AppError::InternalServerError("Failed to get target OID".to_string()))?;
+        repo.reference(
+            &format!("refs/heads/{}", branch_name),
+            target_oid,
+            true, // force
+            &format!("Fast-forward pull of '{}' to {}", branch_name, target_oid),
+        )
+        .map_err(|e| AppError::InternalServerError(format!("Failed to update reference: {}", e)))?;
+        // 更新工作目录
+        let mut checkout_opts = git2::build::CheckoutBuilder::new();
+        checkout_opts.force();
+        repo.checkout_head(Some(&mut checkout_opts)).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to checkout HEAD: {}", e))
+        })?;
+
+        info!("Repository {} pulled successfully", repo_name);
+
+        Ok(())
+    }
 }
