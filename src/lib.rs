@@ -47,7 +47,8 @@ pub async fn create_router() -> Result<Router, AppError> {
                     "/auth",
                     Router::new()
                         .route("/register", post(handler::register))
-                        .route("/login", post(handler::login)),
+                        .route("/login", post(handler::login))
+                        .route("/add/message", post(handler::add_messages_for_users)),
                 )
                 // 需要认证的路由组
                 .nest(
@@ -55,6 +56,8 @@ pub async fn create_router() -> Result<Router, AppError> {
                     Router::new()
                         .route("/user/userdata", get(handler::get_user_data))
                         .route("/user/update", post(handler::update_user_data))
+                        .route("/user/change_password", post(handler::update_user_password))
+                        .route("/user/msg", get(handler::get_user_messages))
                         .route(
                             "/repo/commithistories",
                             get(handler::get_repo_commit_histories),
@@ -66,6 +69,8 @@ pub async fn create_router() -> Result<Router, AppError> {
                         .route("/repo/getdiff", get(handler::get_repo_commit_diff))
                         .route("/repo/update", post(handler::update_repo_data))
                         .route("/repo/del", post(handler::del_repo_for_user))
+                        .route("/repo/branches", get(handler::get_repo_branches))
+                        .route("/repo/pull", post(handler::pull_repo))
                         .layer(middleware::from_fn(auth_middleware::auth_middleware)),
                 ),
         )

@@ -6,8 +6,8 @@ use crate::services::service;
 use crate::shared::error::AppError;
 use crate::shared::jwt::validate_token;
 use crate::shared::response::ApiResponse;
-use crate::vos::ReposVo;
 use crate::vos::userdata::UserData;
+use crate::vos::{ReposVo, UserMsg};
 use crate::{dtos::request, shared::jwt::Claims};
 use axum::ServiceExt;
 use axum::extract::{Path, Query, WebSocketUpgrade};
@@ -43,27 +43,11 @@ pub async fn get_user_data(
     Extension(claims): Extension<Claims>,
     State(service): State<Arc<service::AppState>>,
 ) -> Result<ApiResponse<UserData>, AppError> {
-    println!("get user data handler");
     // 从 JWT claims 中获取用户 ID
     let user_id = claims.sub;
-    println!("claims.sub={}", user_id);
     // 获取用户数据
     let user_data = service.redis.get_user_data(user_id).await?;
-
     Ok(ApiResponse::success_data(user_data))
-}
-
-#[axum::debug_handler]
-pub async fn update_user_data(
-    Extension(claims): Extension<Claims>,
-    State(service): State<Arc<service::AppState>>,
-    Json(payload): Json<request::UserUpdateRequest>,
-) -> Result<(), AppError> {
-    let user_id = claims.sub;
-
-    let mut user_data = service.redis.get_user_data(user_id).await?;
-    // 调用service update
-    todo!()
 }
 
 #[axum::debug_handler]
@@ -457,4 +441,88 @@ pub async fn pull_repo(
         .await?;
 
     Ok(ApiResponse::success("Repository pulled successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn update_user_password(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::UserUpatePasswordRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+
+    if let None = payload.new_password {
+        return Err(AppError::BadRequest("new_password is required".into()));
+    }
+
+    service
+        .update_user_password(&user_id, &payload.new_password.unwrap())
+        .await?;
+
+    Ok(ApiResponse::success("Password updated successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn update_user_data(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::UserUpdateRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    let user_id = claims.sub;
+
+    let new_data = request::UserUpdateRequest {
+        email: payload.email.clone(),
+        avatar: payload.avatar.clone(),
+        department_id: payload.department_id,
+    };
+    service.update_user_data(&user_id, new_data).await?;
+
+    Ok(ApiResponse::success("User data updated successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn get_user_messages(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+) -> Result<ApiResponse<Vec<UserMsg>>, AppError> {
+    let user_id = claims.sub;
+
+    // 获取用户消息
+    let res = service.get_user_messages(&user_id).await?;
+
+    let messages = res
+        .into_iter()
+        .map(|msg| UserMsg {
+            message_type: msg.message_type,
+            content: msg.content,
+            read_status: msg.status,
+            created_at: msg.created_at,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(ApiResponse::success_data(messages))
+}
+
+#[axum::debug_handler]
+pub async fn add_messages_for_users(
+    State(service): State<Arc<service::AppState>>,
+    Json(payload): Json<request::AddMessageRequest>,
+) -> Result<ApiResponse<()>, AppError> {
+    if let None = payload.user_id_vec {
+        return Err(AppError::BadRequest("user_id_vec is required".into()));
+    }
+
+    if let None = payload.content {
+        return Err(AppError::BadRequest("content is required".into()));
+    }
+    // 添加消息
+    service
+        .add_message_for_users(
+            payload.user_id_vec.as_ref().unwrap(),
+            payload.content.unwrap(),
+            payload.message_type,
+        )
+        .await?;
+
+    Ok(ApiResponse::success("Message added successfully"))
 }

@@ -1,4 +1,4 @@
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Debug)]
 pub struct UserData {
     pub username: String,
     pub email: String,

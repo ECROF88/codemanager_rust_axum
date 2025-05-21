@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::field::debug;
 use validator::Validate;
 
 #[derive(Debug, Deserialize, Validate)]
@@ -94,9 +93,8 @@ pub struct UserUpdateRequest {
     pub department_id: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct UserUpatePasswordRequest {
-    // #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
-    pub old_password: Option<String>,
     // #[validate(length(min = 6, message = "Password must be at least 8 characters"))]
     pub new_password: Option<String>,
 }
@@ -132,4 +130,11 @@ pub struct PullRepoRequest {
 
     #[validate(required(message = "branch_name is required"))]
     pub branch_name: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone, Validate)]
+pub struct AddMessageRequest {
+    pub content: Option<String>,
+    pub message_type: Option<String>,
+    pub user_id_vec: Option<Vec<String>>,
 }

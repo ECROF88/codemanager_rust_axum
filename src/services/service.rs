@@ -6,10 +6,13 @@ use redis::{Client, Commands};
 use sqlx::{PgPool, Row, query, query_as};
 use tracing::info;
 
+use crate::db::pg::PostgrePool;
 use crate::dtos::request::{self, RegisterRequest, UserUpdateRequest};
 use crate::gitmodule::structs::{CommitDetail, CommitInfo, GitFileEntry, WebSocketManager};
 use crate::gitmodule::{GitManager, structs};
+use crate::models::message::{Message, MessageCreate, MessageType};
 use crate::models::user::User;
+use crate::models::{self, message};
 use crate::shared::error::AppError;
 use crate::shared::{jwt, setting};
 use crate::vos::ReposVo;
@@ -20,16 +23,17 @@ pub struct AppState {
     pub redis: RedisPool,
     pub git_service: GitService,
     pub ws_manager: WebSocketManager,
-    pub pg_db: PgPool,
+    // pub pg_db: PgPool,
+    pub pg_db: PostgrePool,
 }
 impl AppState {
     pub async fn init_app() -> Result<Arc<AppState>, AppError> {
-        let pg_db = PgPool::connect("postgresql://postgres:@localhost:5432/mydb")
-            .map_err(|e| {
-                AppError::InternalServerError(format!("Failed to connect PG DataBase {}", e))
-            })
-            .await?;
-
+        // let pg_db = PgPool::connect("postgresql://postgres:@localhost:5432/mydb")
+        //     .map_err(|e| {
+        //         AppError::InternalServerError(format!("Failed to connect PG DataBase {}", e))
+        //     })
+        //     .await?;
+        let pg_db = PostgrePool::new("postgresql://postgres:@localhost:5432/mydb").await;
         let redis = RedisPool::new();
         let git_service = GitService::new();
         let ws_manager = WebSocketManager::new();
@@ -80,7 +84,7 @@ impl AppState {
     async fn chack_if_exist(&self, username: &str) -> Result<(), AppError> {
         let option = sqlx::query("SELECT username FROM users WHERE username = $1")
             .bind(&username)
-            .fetch_optional(&self.pg_db)
+            .fetch_optional(&self.pg_db.pool)
             .await
             .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
 
@@ -104,7 +108,7 @@ impl AppState {
         .bind(&payload.email)
         .bind(&payload.password) // 注意：实际应用中应该对密码进行哈希处理
         .bind(chrono::Utc::now())
-        .fetch_one(&self.pg_db)
+        .fetch_one(&self.pg_db.pool)
         .await
         .map_err(|e| {
             AppError::InternalServerError(format!(
@@ -138,8 +142,62 @@ impl AppState {
         Ok(())
     }
 
-    async fn update_user_data(&self, new_data: UserUpdateRequest) -> Result<(), AppError> {
-        todo!()
+    pub async fn update_user_data(
+        &self,
+        user_id: &str,
+        new_data: UserUpdateRequest,
+    ) -> Result<(), AppError> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users 
+            SET email = COALESCE($1, email),
+                avatar = COALESCE($2, avatar),
+                department_id = COALESCE($3, department_id)
+            WHERE username = $4
+            RETURNING id, username, email, password, avatar, created_at, department_id
+            "#,
+        )
+        .bind(new_data.email)
+        .bind(new_data.avatar)
+        .bind(new_data.department_id)
+        .bind(user_id)
+        .fetch_optional(&self.pg_db.pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
+
+        match user {
+            Some(updated_user) => {
+                // 更新Redis缓存
+                self.redis.cache_user_to_redis(&updated_user).await?;
+                Ok(())
+            }
+            None => Err(AppError::NotFound(format!("User not found: {}", user_id))),
+        }
+    }
+
+    pub async fn update_user_password(
+        &self,
+        username: &str,
+        new_password: &str,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            r#"
+        UPDATE users 
+        SET password = $1 
+        WHERE username = $2
+        "#,
+        )
+        .bind(new_password)
+        .bind(username)
+        .execute(&self.pg_db.pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!("User not found: {}", username)));
+        }
+
+        Ok(())
     }
 
     async fn validate_user_pass(&self, username: &str, password: &str) -> Result<(), AppError> {
@@ -196,7 +254,7 @@ impl AppState {
     async fn get_user_from_db(&self, username: &str) -> Result<User, AppError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
             .bind(username)
-            .fetch_optional(&self.pg_db)
+            .fetch_optional(&self.pg_db.pool)
             .await
             .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
         info!("db get user:{:?}", user.as_ref().unwrap());
@@ -204,6 +262,40 @@ impl AppState {
             Some(user) => Ok(user),
             None => Err(AppError::NotFound(format!("User not found: {}", username))),
         }
+    }
+
+    pub async fn get_user_messages(&self, user_id: &str) -> Result<Vec<Message>, AppError> {
+        info!("get user messages: {}", user_id);
+        let messages = sqlx::query_as::<_, Message>(
+            r#"
+            SELECT * FROM messages WHERE username = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pg_db.pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
+        info!("get user messages: {:?}", messages);
+
+        Ok(messages)
+    }
+
+    pub async fn add_message_for_users(
+        &self,
+        user_id_vec: &Vec<String>,
+        msg: String,
+        message_type: Option<String>,
+    ) -> Result<(), AppError> {
+        // let message_type = message_type.unwrap_or(message::MessageType::default());
+
+        let msg_type = MessageType::try_from(message_type.unwrap_or("system".to_string()))
+            .map_err(|e| AppError::InternalServerError(format!("Invalid message type: {}", e)))?;
+
+        info!("add message for users: {:?}", user_id_vec);
+
+        self.pg_db
+            .add_message_for_users(user_id_vec, msg, msg_type)
+            .await
     }
 }
 

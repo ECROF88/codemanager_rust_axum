@@ -22,3 +22,39 @@ It’s recommended to use tower::ServiceBuilder to apply multiple middleware at 
 2. fetch_one :  若查询不返回任何行，会返回错误；如果返回多行，只获取第一行
 3. fetch_optional：执行查询并返回零或一行结果，返回 Option<Row>
 4. fetch_all：执行查询并返回所有行，返回 Vec<Row>
+
+
+对于枚举类型，需要实现TryFrom trait才能把数据库里面的东西拿出来
+也需要derive Type 才能再bind时候传入数据库。
+
+
+sqlx transaction:
+1: let mut tx = pool.begin().await 最后 tx.commit.await
+2: 自己添加transaction函数，传入callback
+```rust
+  pub async fn transaction<F, R, E>(&self, callback: F) -> Result<R, E>
+    where
+        F: for<'c> FnOnce(&'c mut sqlx::Transaction<'_, sqlx::Postgres>) -> BoxFuture<'c, Result<R, E>>,
+        E: From<sqlx::Error>,
+    {
+        let mut tx = self.pool.begin().await?;
+        let result = callback(&mut tx).await?;
+        tx.commit().await?;
+        Ok(result)
+    }
+```
+
+超时处理：
+```rust 
+let result = tokio::time::timeout(
+    std::time::Duration::from_secs(5),
+    self.pg_db.transaction(|tx| Box::pin(async move { /* ... */ }))
+).await??;
+```
+
+PostgreSQL 默认的事务隔离级别是 READ COMMITTED。如需更高隔离级别，可以在开始事务时指定
+```rust
+let mut tx = pool.begin_with_config(
+    TransactionOptions::new().isolation(IsolationLevel::Serializable)
+).await?;
+```

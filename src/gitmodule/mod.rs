@@ -307,6 +307,13 @@ impl GitManager {
             AppError::InternalServerError(format!("Failed to create revwalk: {}", e))
         })?;
 
+        if (page - 1) * limit > total_count {
+            return Err(AppError::NotFound(format!(
+                "Page {} exceeds total records. Total commits: {}, page size: {}",
+                page, total_count, limit
+            )));
+        }
+
         revwalk
             .set_sorting(git2::Sort::TIME)
             .map_err(|e| AppError::InternalServerError(format!("Failed to set sorting: {}", e)))?;
@@ -315,19 +322,19 @@ impl GitManager {
             .push_head()
             .map_err(|e| AppError::InternalServerError(format!("Failed to push head: {}", e)))?;
 
-        let start_index = (page - 1) * limit;
-        let end_index = start_index + limit;
-
+        // let start_index = (page - 1) * limit;
+        // let end_index = start_index + limit;
+        let skip_count = (page - 1) * limit;
         let mut commits = Vec::new();
-        for (i, oid) in revwalk.enumerate() {
-            if i < start_index {
-                continue;
-            }
+        for (i, oid) in revwalk.enumerate().skip(skip_count).take(limit) {
+            // if i < start_index {
+            //     continue;
+            // }
 
-            // 达到页末，结束遍历
-            if i >= end_index {
-                break;
-            }
+            // // 达到页末，结束遍历
+            // if i >= end_index {
+            //     break;
+            // }
             let oid = oid.map_err(|e| {
                 AppError::InternalServerError(format!("Failed to get commit ID: {}", e))
             })?;
