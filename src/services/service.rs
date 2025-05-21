@@ -142,6 +142,33 @@ impl AppState {
         Ok(())
     }
 
+    pub async fn get_user_data(&self, user_id: String) -> Result<UserData, AppError> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            SELECT * FROM users WHERE username = $1
+            "#,
+        )
+        .bind(&user_id)
+        .fetch_optional(&self.pg_db.pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
+
+        match user {
+            Some(user) => {
+                // 更新Redis缓存
+                if let Err(_) = self.redis.cache_user_to_redis(&user).await {
+                    info!("Failed to cache user to Redis: user is {}", user.username);
+                }
+                Ok(UserData {
+                    username: user.username,
+                    email: user.email,
+                    avatar: user.avatar,
+                })
+            }
+            None => Err(AppError::NotFound(format!("User not found: {}", user_id))),
+        }
+    }
+
     pub async fn update_user_data(
         &self,
         user_id: &str,

@@ -138,3 +138,8 @@ pub struct AddMessageRequest {
     pub message_type: Option<String>,
     pub user_id_vec: Option<Vec<String>>,
 }
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct RepoTotalCountRequest {
+    pub repo_name: Option<String>,
+}

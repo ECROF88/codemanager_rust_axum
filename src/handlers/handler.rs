@@ -46,7 +46,7 @@ pub async fn get_user_data(
     // 从 JWT claims 中获取用户 ID
     let user_id = claims.sub;
     // 获取用户数据
-    let user_data = service.redis.get_user_data(user_id).await?;
+    let user_data = service.get_user_data(user_id).await?;
     Ok(ApiResponse::success_data(user_data))
 }
 
@@ -486,8 +486,6 @@ pub async fn get_user_messages(
     State(service): State<Arc<service::AppState>>,
 ) -> Result<ApiResponse<Vec<UserMsg>>, AppError> {
     let user_id = claims.sub;
-
-    // 获取用户消息
     let res = service.get_user_messages(&user_id).await?;
 
     let messages = res
@@ -525,4 +523,25 @@ pub async fn add_messages_for_users(
         .await?;
 
     Ok(ApiResponse::success("Message added successfully"))
+}
+
+#[axum::debug_handler]
+pub async fn get_commit_counts(
+    Extension(claims): Extension<Claims>,
+    State(service): State<Arc<service::AppState>>,
+    Query(params): Query<request::RepoTotalCountRequest>,
+) -> Result<ApiResponse<usize>, AppError> {
+    let user_id = claims.sub;
+
+    if let Some(repo_name) = &params.repo_name {
+        let commit_counts = service
+            .git_service
+            .get_repo_commit_count(&user_id, repo_name)
+            // .get_repo_commit_counts(&user_id, &repo_name)
+            .await?;
+
+        Ok(ApiResponse::success_data(commit_counts))
+    } else {
+        Err(AppError::BadRequest("repo_name is required".into()))
+    }
 }

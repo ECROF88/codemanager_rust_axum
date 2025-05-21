@@ -71,6 +71,7 @@ pub async fn create_router() -> Result<Router, AppError> {
                         .route("/repo/del", post(handler::del_repo_for_user))
                         .route("/repo/branches", get(handler::get_repo_branches))
                         .route("/repo/pull", post(handler::pull_repo))
+                        .route("/repo/commit_count", get(handler::get_commit_counts))
                         .layer(middleware::from_fn(auth_middleware::auth_middleware)),
                 ),
         )
