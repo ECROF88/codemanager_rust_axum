@@ -5,6 +5,7 @@ use sqlx::{FromRow, prelude::Type};
 /// 消息状态枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[sqlx(type_name = "messagestatus", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum MessageStatus {
     Unread,
     Read,
