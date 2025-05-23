@@ -48,7 +48,8 @@ pub async fn create_router() -> Result<Router, AppError> {
                     Router::new()
                         .route("/register", post(handler::register))
                         .route("/login", post(handler::login))
-                        .route("/add/message", post(handler::add_messages_for_users)),
+                        .route("/add/message", post(handler::add_messages_for_users))
+                        .route("/user/list", get(handler::get_user_list)),
                 )
                 // 需要认证的路由组
                 .nest(

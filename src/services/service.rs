@@ -16,7 +16,7 @@ use crate::models::{self, message};
 use crate::shared::error::AppError;
 use crate::shared::{jwt, setting};
 use crate::vos::ReposVo;
-use crate::vos::userdata::UserData;
+use crate::vos::userdata::{MessagePageUserData, UserData};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,11 +28,6 @@ pub struct AppState {
 }
 impl AppState {
     pub async fn init_app() -> Result<Arc<AppState>, AppError> {
-        // let pg_db = PgPool::connect("postgresql://postgres:@localhost:5432/mydb")
-        //     .map_err(|e| {
-        //         AppError::InternalServerError(format!("Failed to connect PG DataBase {}", e))
-        //     })
-        //     .await?;
         let pg_db = PostgrePool::new("postgresql://postgres:@localhost:5432/mydb").await;
         let redis = RedisPool::new();
         let git_service = GitService::new();
@@ -125,7 +120,7 @@ impl AppState {
             id: Some(user_id),
             username: payload.username.clone(),
             email: payload.email.clone(),
-            password: payload.password.clone(), // 注意：实际中应使用哈希后的密码
+            password: payload.password.clone(), // need HASH
             avatar: None,
             created_at: chrono::Utc::now(),
             department_id: None,
@@ -140,6 +135,27 @@ impl AppState {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_user_list(&self) -> Result<Vec<MessagePageUserData>, AppError> {
+        let users = sqlx::query_as::<_, MessagePageUserData>(
+            r#"
+        SELECT 
+            u.username as phone, 
+            u.email, 
+            d.name as department_name, 
+            u.created_at as create_time
+        FROM 
+            users u
+        LEFT JOIN 
+            departments d ON u.department_id = d.id
+        "#,
+        )
+        .fetch_all(&self.pg_db.pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database query failed: {}", e)))?;
+
+        Ok(users)
     }
 
     pub async fn get_user_data(&self, user_id: String) -> Result<UserData, AppError> {

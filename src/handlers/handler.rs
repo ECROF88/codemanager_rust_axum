@@ -6,7 +6,7 @@ use crate::services::service;
 use crate::shared::error::AppError;
 use crate::shared::jwt::validate_token;
 use crate::shared::response::ApiResponse;
-use crate::vos::userdata::UserData;
+use crate::vos::userdata::{MessagePageUserData, UserData};
 use crate::vos::{ReposVo, UserMsg};
 use crate::{dtos::request, shared::jwt::Claims};
 use axum::ServiceExt;
@@ -544,4 +544,14 @@ pub async fn get_commit_counts(
     } else {
         Err(AppError::BadRequest("repo_name is required".into()))
     }
+}
+
+#[axum::debug_handler]
+pub async fn get_user_list(
+    State(service): State<Arc<service::AppState>>,
+) -> Result<ApiResponse<Vec<MessagePageUserData>>, AppError> {
+    // 获取用户列表
+    let user_list = service.get_user_list().await?;
+
+    Ok(ApiResponse::success_data(user_list))
 }
